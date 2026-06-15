@@ -14,6 +14,7 @@ const MeetingRoom=()=>{
   const [participants,setParticipants]=useState([]);
   const [loading,setLoading]=useState(false);
   const [errorMessage,setErrorMessage]=useState("");
+  const [isHost,setIsHost]=useState(false);
 
   const joinMeeting=async()=>{
     try{
@@ -23,7 +24,9 @@ const MeetingRoom=()=>{
       const response=await axios.post(
         `https://roomlybackend.onrender.com/api/v1/meetings/${meetingId}/join`,
         {},
-        { withCredentials:true }
+        {
+          withCredentials:true,
+        }
       );
 
       const meetingData=response.data.meeting;
@@ -31,11 +34,19 @@ const MeetingRoom=()=>{
 
       setMeeting(meetingData);
 
+      setIsHost(
+        meetingData.hostId?.toString()===
+        participant._id?.toString()
+      );
+
       if(!socket.connected){
         socket.connect();
       }
 
-      socket.emit("joinMeeting",{ meetingId,participant });
+      socket.emit("joinMeeting",{
+        meetingId,
+        participant,
+      });
 
       setJoined(true);
 
@@ -57,15 +68,65 @@ const MeetingRoom=()=>{
       setParticipants(users);
     };
 
-    socket.on("participantsUpdated",handleParticipants);
+    const handleMeetingEnded=()=>{
 
-    return()=>{
-      socket.off("participantsUpdated",handleParticipants);
+      setParticipants([]);
+
+      if(socket.connected){
+        socket.disconnect();
+      }
+
+      navigate(
+        "/home/meetings",
+        {
+          replace:true,
+        }
+      );
+
     };
 
-  },[]);
+    socket.on(
+      "participantsUpdated",
+      handleParticipants
+    );
 
-  const leaveMeeting=async()=>{
+    socket.on(
+      "meetingEnded",
+      handleMeetingEnded
+    );
+
+    return()=>{
+
+      socket.off(
+        "participantsUpdated",
+        handleParticipants
+      );
+
+      socket.off(
+        "meetingEnded",
+        handleMeetingEnded
+      );
+
+      if(socket.connected){
+        socket.disconnect();
+      }
+
+    };
+
+  },[navigate]);
+
+  const leaveMeeting=()=>{
+
+    if(socket.connected){
+      socket.disconnect();
+    }
+
+    navigate("/home/meetings");
+
+  };
+
+  const endMeeting=async()=>{
+
     try{
 
       await axios.patch(
@@ -76,19 +137,41 @@ const MeetingRoom=()=>{
         }
       );
 
+      socket.emit(
+        "endMeeting",
+        {
+          meetingId,
+        }
+      );
+
+      if(socket.connected){
+        socket.disconnect();
+      }
+
+      navigate(
+        "/home/meetings",
+        {
+          replace:true,
+        }
+      );
+
     }catch(err){
+
       console.log(err);
-    }finally{
-      socket.disconnect();
-      navigate("/home/meetings");
+
     }
+
   };
 
   if(!joined){
     return(
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
         <div className="w-full max-w-xl rounded-3xl bg-slate-900 border border-slate-800 p-8 shadow-2xl">
-          <Video size={56} className="mx-auto text-cyan-500"/>
+
+          <Video
+            size={56}
+            className="mx-auto text-cyan-500"
+          />
 
           <h1 className="mt-6 text-center text-3xl font-bold text-white">
             RoomLY Meeting
@@ -103,7 +186,7 @@ const MeetingRoom=()=>{
           </div>
 
           {errorMessage && (
-            <p className="mt-4 text-center text-red-500 font-medium">
+            <p className="mt-4 text-center text-red-500">
               {errorMessage}
             </p>
           )}
@@ -113,8 +196,11 @@ const MeetingRoom=()=>{
             disabled={loading}
             className="mt-8 w-full rounded-xl bg-cyan-500 py-4 text-white font-semibold hover:bg-cyan-600 disabled:opacity-50 transition-all"
           >
-            {loading ? "Joining..." : "Join Meeting"}
+            {loading
+              ? "Joining..."
+              : "Join Meeting"}
           </button>
+
         </div>
       </div>
     );
@@ -122,7 +208,9 @@ const MeetingRoom=()=>{
 
   return(
     <div className="min-h-screen bg-slate-950">
+
       <div className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
+
         <div>
           <h1 className="text-2xl font-bold text-white">
             {meeting?.meetingName}
@@ -133,42 +221,102 @@ const MeetingRoom=()=>{
           </p>
         </div>
 
-        <button
-          onClick={leaveMeeting}
-          className="flex items-center gap-2 rounded-xl bg-red-500 px-4 py-3 text-white font-medium hover:bg-red-600"
-        >
-          <PhoneOff size={18}/>
-          Leave
-        </button>
+        <div className="flex items-center gap-3">
+
+          {isHost && (
+            <button
+              onClick={endMeeting}
+              className="rounded-xl bg-red-700 px-4 py-3 text-white font-medium hover:bg-red-800 transition-all"
+            >
+              End Meeting
+            </button>
+          )}
+
+          <button
+            onClick={leaveMeeting}
+            className="flex items-center gap-2 rounded-xl bg-red-500 px-4 py-3 text-white font-medium hover:bg-red-600 transition-all"
+          >
+            <PhoneOff size={18}/>
+            Leave
+          </button>
+
+        </div>
+
       </div>
 
       <div className="p-6">
+
         <div className="mb-6 flex items-center gap-2 text-white">
           <Users size={20}/>
-          <span>{participants.length} Participants</span>
+          <span>
+            {participants.length}
+            {" "}
+            Participant
+            {participants.length!==1
+              ? "s"
+              : ""}
+          </span>
         </div>
 
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {participants.map((user)=>(
-            <div
-              key={user._id}
-              className="aspect-video rounded-3xl bg-slate-900 border border-slate-800 flex flex-col items-center justify-center hover:border-cyan-500 transition-all"
-            >
-              <div className="h-20 w-20 rounded-full bg-cyan-500 flex items-center justify-center text-2xl font-bold text-white">
-                {user.name?.charAt(0)?.toUpperCase()}
+        {participants.length===0 ? (
+
+          <div className="flex flex-col items-center justify-center py-20">
+
+            <Users
+              size={60}
+              className="text-slate-600"
+            />
+
+            <h2 className="mt-4 text-xl font-semibold text-white">
+              Waiting For Participants
+            </h2>
+
+            <p className="mt-2 text-slate-400">
+              Share your meeting link and invite others.
+            </p>
+
+          </div>
+
+        ) : (
+
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+
+            {participants.map((user)=>(
+
+              <div
+                key={user._id}
+                className="aspect-video rounded-3xl bg-slate-900 border border-slate-800 flex flex-col items-center justify-center relative hover:border-cyan-500 transition-all"
+              >
+
+                {meeting?.hostId?.toString()===
+                  user?._id?.toString() && (
+                  <div className="absolute top-3 right-3 rounded-full bg-yellow-500 px-3 py-1 text-xs font-semibold text-black">
+                    Host
+                  </div>
+                )}
+
+                <div className="h-20 w-20 rounded-full bg-cyan-500 flex items-center justify-center text-2xl font-bold text-white">
+                  {user?.name?.charAt(0)?.toUpperCase()}
+                </div>
+
+                <h3 className="mt-4 text-lg font-semibold text-white">
+                  {user?.name}
+                </h3>
+
+                <p className="mt-1 px-3 text-center text-sm text-slate-400 break-all">
+                  {user?.email}
+                </p>
+
               </div>
 
-              <h3 className="mt-4 text-lg font-semibold text-white">
-                {user.name}
-              </h3>
+            ))}
 
-              <p className="mt-1 text-sm text-slate-400">
-                {user.email}
-              </p>
-            </div>
-          ))}
-        </div>
+          </div>
+
+        )}
+
       </div>
+
     </div>
   );
 };
