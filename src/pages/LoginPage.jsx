@@ -176,7 +176,7 @@ export default function LoginPage() {
           className="
           absolute
           inset-0
-          bg-gradient-to-r
+          bg-linear-to-r
           from-slate-950/50
           via-slate-950/20
           to-transparent
