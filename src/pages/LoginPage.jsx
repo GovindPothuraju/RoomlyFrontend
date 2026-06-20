@@ -10,20 +10,21 @@ import { useNavigate } from "react-router-dom";
 import { addUser } from "../store/userSlice";
 
 import { useEffect } from "react";
-import { useSelector } from "react-redux";
+
+
 
 export default function LoginPage() {
 
   const dispatch = useDispatch();
   const navigate = useNavigate();
 
-  const user = useSelector((store) => store.user);
   const [authLoading, setAuthLoading] = useState(true);
+
 
   const getCurrentUser = async () => {
     try {
       const response = await axios.get(
-        "https://roomlybackend.onrender.com/api/v1/user/profile",
+        `${import.meta.env.VITE_API_URL}/api/v1/user/profile`,
         {
           withCredentials: true,
         }
@@ -61,7 +62,8 @@ export default function LoginPage() {
       setError("");
 
       const response = await axios.post(
-        "https://roomlybackend.onrender.com/api/v1/user/login",
+        `${import.meta.env.VITE_API_URL}/api/v1/user/login`,
+
         {
           email,
           password,
@@ -92,7 +94,8 @@ export default function LoginPage() {
       setError("");
 
       const response = await axios.post(
-        "https://roomlybackend.onrender.com/api/v1/user/register",
+        `${import.meta.env.VITE_API_URL}/api/v1/user/register`,
+
         {
           name,
           username,
