@@ -1,204 +1,232 @@
-import { useEffect,useRef,useState } from "react";
+import {useEffect,useRef,useState} from "react";
 
-const useWebRTC=()=>{
-
+const useWebRTC=({socket})=>{
   const localVideoRef=useRef(null);
-
+  const peerConnectionsRef=useRef({});
+  const localStreamRef=useRef(null);
+  const iceCandidateQueuesRef=useRef({});
+  const pendingPeersRef=useRef([]);
   const [localStream,setLocalStream]=useState(null);
+  const [remoteStreams,setRemoteStreams]=useState({});
   const [isMicOn,setIsMicOn]=useState(true);
   const [isVideoOn,setIsVideoOn]=useState(true);
 
-  const peerConnectionRef = useRef(null);
-
+  /* ── local media ── */
   const startLocalStream=async()=>{
-
     try{
-
-      const stream=await navigator.mediaDevices.getUserMedia({
-        video:true,
-        audio:true
-      });
-
+      const stream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+      window.localStream=stream;
+      localStreamRef.current=stream;
       setLocalStream(stream);
-
-    }catch(error){
-
-      console.error("MEDIA ERROR:",error);
-
-    }
-
+      if(localVideoRef.current)localVideoRef.current.srcObject=stream;
+      return stream;
+    }catch(err){console.error("MEDIA ERROR:",err);return null;}
   };
 
   const stopLocalStream=()=>{
-
-    if(!localStream)return;
-
-    localStream.getTracks().forEach(track=>{
-      track.stop();
-    });
+    try{window.localStream?.getTracks().forEach(t=>t.stop());}catch(e){}
+    localStreamRef.current=null;
+    window.localStream=null;
     setLocalStream(null);
   };
 
-  const toggleMic = async () => {
-    if (!localStream) return;
-    if (isMicOn) {
-      // Turn mic OFF
-      localStream.getAudioTracks().forEach(track => {
-        track.stop();
-      });
-      setIsMicOn(false);
-    } else {
-      // Turn mic ON
-      const audioStream = await navigator.mediaDevices.getUserMedia({
-        audio: true
-      });
-      const newAudioTrack = audioStream.getAudioTracks()[0];
-      const updatedStream = new MediaStream();
-      // Keep existing video track
-      localStream.getVideoTracks().forEach(track => {
-        updatedStream.addTrack(track);
-      });
-      updatedStream.addTrack(newAudioTrack);
-      setLocalStream(updatedStream);
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = updatedStream;
-      }
-      setIsMicOn(true);
-    }
+  const toggleMic=()=>{
+    const stream=localStreamRef.current;
+    if(!stream)return;
+    stream.getAudioTracks().forEach(t=>{t.enabled=!t.enabled;});
+    setIsMicOn(prev=>!prev);
   };
 
-  const toggleVideo = async () => {
-    if (!localStream) return;
-    if (isVideoOn) {
-      // Turn camera OFF
-      const videoTrack = localStream.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.stop();
-      }
+  const toggleVideo=()=>{
+    const stream=localStreamRef.current;
+    if(!stream)return;
+    const videoTrack=stream.getVideoTracks()[0];
+    if(!videoTrack)return;
+    if(videoTrack.readyState==="live"){
+      videoTrack.stop();
       setIsVideoOn(false);
-    } else {
-      // Turn camera ON again
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true
-      });
-      const newVideoTrack = newStream.getVideoTracks()[0];
-
-      // Keep existing audio track
-      const audioTrack = localStream.getAudioTracks()[0];
-      const updatedStream = new MediaStream();
-      if (audioTrack) {
-        updatedStream.addTrack(audioTrack);
-      }
-      updatedStream.addTrack(newVideoTrack);
-      setLocalStream(updatedStream);
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = updatedStream;
-      }
-      setIsVideoOn(true);
+    }else{
+      navigator.mediaDevices.getUserMedia({video:true}).then(newStream=>{
+        const newTrack=newStream.getVideoTracks()[0];
+        stream.removeTrack(videoTrack);
+        stream.addTrack(newTrack);
+        Object.values(peerConnectionsRef.current).forEach(pc=>{
+          const sender=pc.getSenders().find(s=>s.track?.kind==="video");
+          if(sender)sender.replaceTrack(newTrack);
+        });
+        if(localVideoRef.current)localVideoRef.current.srcObject=stream;
+        setIsVideoOn(true);
+      }).catch(err=>console.error("CAM RE-ACQUIRE ERROR:",err));
     }
   };
 
-  //2  creating peer
-  const createPeerConnection=()=>{
+  /* ── peer connection ── */
+  const createPeerConnection=(targetSocketId)=>{
+    if(peerConnectionsRef.current[targetSocketId])return peerConnectionsRef.current[targetSocketId];
 
     const pc=new RTCPeerConnection({
       iceServers:[
-        {
-          urls:"stun:stun.l.google.com:19302"
-        }
+        {urls:"stun:stun.l.google.com:19302"},
+        {urls:"stun:stun1.l.google.com:19302"},
       ]
     });
 
-    pc.onconnectionstatechange=()=>{
-      console.log(
-        "CONNECTION STATE:",
-        pc.connectionState
-      );
+    // receive remote tracks — mirrors reference's onaddstream pattern
+    pc.ontrack=(event)=>{
+      const stream=event.streams[0];
+      if(!stream)return;
+      setRemoteStreams(prev=>{
+        // don't re-set if stream object is identical (avoids re-render flicker)
+        if(prev[targetSocketId]?.id===stream.id)return prev;
+        return {...prev,[targetSocketId]:stream};
+      });
     };
 
-    pc.oniceconnectionstatechange=()=>{
-      console.log(
-        "ICE CONNECTION STATE:",
-        pc.iceConnectionState
-      );
+    pc.onicecandidate=(event)=>{
+      if(!event.candidate)return;
+      socket.emit("iceCandidate",{candidate:event.candidate,targetSocketId});
     };
 
-    pc.onicegatheringstatechange=()=>{
-      console.log(
-        "ICE GATHERING STATE:",
-        pc.iceGatheringState
-      );
-    };
-
-    pc.onsignalingstatechange=()=>{
-      console.log(
-        "SIGNALING STATE:",
-        pc.signalingState
-      );
-    };
-
-    peerConnectionRef.current=pc;
-
-    console.log("PEER CREATED");
-    console.log(pc);
-
+    peerConnectionsRef.current[targetSocketId]=pc;
     return pc;
   };
 
-  // 3 .add tracks to pc
-  const addLocalTracks=()=>{
-    const pc=peerConnectionRef.current;
-    if(!pc||!localStream)return;
-
-    const sendersByKind = new Map(
-      pc.getSenders().map((s) => [s.track?.kind, s])
-    );
-
-    localStream.getTracks().forEach(track => {
-      // Prevent: "A sender already exists for the track"
-      if (sendersByKind.has(track.kind)) return;
-      pc.addTrack(track, localStream);
-      console.log("TRACK ADDED:", track.kind);
+  const addLocalTracks=(pc)=>{
+    const stream=localStreamRef.current||window.localStream;
+    if(!stream)return;
+    stream.getTracks().forEach(track=>{
+      const alreadyAdded=pc.getSenders().some(s=>s.track===track);
+      if(!alreadyAdded)pc.addTrack(track,stream);
     });
-
-    console.log("SENDERS:", pc.getSenders());
-    console.log("SENDER COUNT:", pc.getSenders().length);
   };
 
-  useEffect(() => {
-    // 1. start local stream
-    startLocalStream();
-    // 2. create peer connection
-    createPeerConnection();
-    return () => {
-      stopLocalStream();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
+  /* ── ICE queue: same pattern as reference's addIceCandidate guard ── */
+  const drainIceCandidates=async(socketId)=>{
+    const pc=peerConnectionsRef.current[socketId];
+    const queue=iceCandidateQueuesRef.current[socketId]||[];
+    if(!pc||!queue.length)return;
+    iceCandidateQueuesRef.current[socketId]=[];
+    for(const candidate of queue){
+      try{await pc.addIceCandidate(new RTCIceCandidate(candidate));}
+      catch(err){console.error("ICE drain error:",err);}
     }
-  }, [localStream]);
+  };
 
-// for audio tracks
+  /* ── signaling ── */
+  const createOffer=async(targetSocketId)=>{
+    const pc=createPeerConnection(targetSocketId);
+    if(pc.signalingState!=="stable")return;
+    addLocalTracks(pc);
+    try{
+      const offer=await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.emit("offer",{offer:pc.localDescription,targetSocketId,senderSocketId:socket.id});
+    }catch(err){console.error("createOffer error:",err);}
+  };
+
+  const handleOffer=async({offer,senderSocketId})=>{
+    const pc=createPeerConnection(senderSocketId);
+    if(pc.signalingState!=="stable")return;
+    addLocalTracks(pc);
+    try{
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      await drainIceCandidates(senderSocketId);
+      const answer=await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit("answer",{answer:pc.localDescription,targetSocketId:senderSocketId});
+    }catch(err){console.error("handleOffer error:",err);}
+  };
+
+  const handleAnswer=async({answer,senderSocketId})=>{
+    const pc=peerConnectionsRef.current[senderSocketId];
+    if(!pc||pc.signalingState==="stable")return;
+    try{
+      await pc.setRemoteDescription(new RTCSessionDescription(answer));
+      await drainIceCandidates(senderSocketId);
+    }catch(err){console.error("handleAnswer error:",err);}
+  };
+
+  const handleIceCandidate=({candidate,senderSocketId})=>{
+    const pc=peerConnectionsRef.current[senderSocketId];
+    if(!pc||!pc.remoteDescription){
+      if(!iceCandidateQueuesRef.current[senderSocketId])iceCandidateQueuesRef.current[senderSocketId]=[];
+      iceCandidateQueuesRef.current[senderSocketId].push(candidate);
+      return;
+    }
+    pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(err=>console.error("ICE error:",err));
+  };
+
+  /* ── lifecycle ── */
   useEffect(()=>{
-    if(localStream&&peerConnectionRef.current){
-      addLocalTracks();
-    }
+    startLocalStream();
+    return()=>stopLocalStream();
+  },[]);
+
+  useEffect(()=>{
+    if(localVideoRef.current&&localStream)localVideoRef.current.srcObject=localStream;
   },[localStream]);
 
-  return{
-    localVideoRef,
-    localStream,
-    isMicOn,
-    isVideoOn,
-    toggleMic,
-    toggleVideo,
-    stopLocalStream
-  };
+  // drain pending peers the moment the local stream is ready
+  useEffect(()=>{
+    if(!localStream||!pendingPeersRef.current.length)return;
+    const pending=[...pendingPeersRef.current];
+    pendingPeersRef.current=[];
+    pending.forEach(socketId=>createOffer(socketId));
+  },[localStream]);
 
+  useEffect(()=>{
+    if(!socket)return;
+
+    const onExistingParticipants=(users)=>{
+      users.forEach(user=>{
+        if(user.socketId===socket.id)return;
+        if(!localStreamRef.current){
+          pendingPeersRef.current.push(user.socketId);
+        }else{
+          createOffer(user.socketId);
+        }
+      });
+    };
+
+    const onUserJoined=(user)=>{
+      if(user.socketId===socket.id)return;
+      // new user joined — they will send us an offer; we don't initiate here
+      // (the new user gets existingParticipants and sends offers to everyone)
+    };
+
+    const onUserLeft=({socketId})=>{
+      try{peerConnectionsRef.current[socketId]?.close();}catch(e){}
+      delete peerConnectionsRef.current[socketId];
+      delete iceCandidateQueuesRef.current[socketId];
+      pendingPeersRef.current=pendingPeersRef.current.filter(id=>id!==socketId);
+      setRemoteStreams(prev=>{const u={...prev};delete u[socketId];return u;});
+    };
+
+    socket.on("existingParticipants",onExistingParticipants);
+    socket.on("userJoined",onUserJoined);
+    socket.on("userLeft",onUserLeft);
+    socket.on("offer",handleOffer);
+    socket.on("answer",handleAnswer);
+    socket.on("iceCandidate",handleIceCandidate);
+
+    return()=>{
+      socket.off("existingParticipants",onExistingParticipants);
+      socket.off("userJoined",onUserJoined);
+      socket.off("userLeft",onUserLeft);
+      socket.off("offer",handleOffer);
+      socket.off("answer",handleAnswer);
+      socket.off("iceCandidate",handleIceCandidate);
+    };
+  },[socket]);
+
+  useEffect(()=>{
+    return()=>{
+      Object.values(peerConnectionsRef.current).forEach(pc=>{try{pc.close();}catch(e){}});
+      peerConnectionsRef.current={};
+    };
+  },[]);
+
+  return{localVideoRef,localStream,remoteStreams,isMicOn,isVideoOn,toggleMic,toggleVideo,stopLocalStream};
 };
 
 export default useWebRTC;

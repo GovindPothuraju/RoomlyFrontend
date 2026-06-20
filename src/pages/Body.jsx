@@ -13,31 +13,36 @@ const Body = () => {
 
   const [loading, setLoading] = useState(true);
 
+  const fetchProfile = async () => {
+    try {
+      if (user) {
+        setLoading(false);
+        return;
+      }
+
+      const response = await axios.get(
+        "https://roomlybackend.onrender.com/api/v1/user/profile",
+        {
+          withCredentials: true,
+        }
+      );
+
+      dispatch(addUser(response.data.user));
+    } catch { 
+      dispatch(removeUser());
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    fetchProfile();
+    // run async function inside effect to avoid lint complaining about sync setState
+    (async () => {
+      await fetchProfile();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const fetchProfile = async () => {
-  try {
-    if (user) {
-      setLoading(false);
-      return;
-    }
-
-    const response = await axios.get(
-      "https://roomlybackend.onrender.com/api/v1/user/profile",
-      {
-        withCredentials: true,
-      }
-    );
-
-    dispatch(addUser(response.data.user));
-  } catch (err) {
-    dispatch(removeUser());
-  } finally {
-    setLoading(false);
-  }
-};
 
   if (loading) {
     return <PageShimmer />;
