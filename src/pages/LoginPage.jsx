@@ -50,8 +50,8 @@ export default function LoginPage() {
   const [isLogin, setIsLogin] = useState(true);
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("govindpothuraju2006@gmail.com");
-  const [password, setPassword] = useState("Govind@2006");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
