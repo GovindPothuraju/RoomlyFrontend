@@ -15,7 +15,7 @@ const Meetings = () => {
   const createMeeting = async () => {
     try {
       setLoading(true);
-      const response =await axios.post("https://roomlybackend.onrender.com/api/v1/meetings",
+        const response =await axios.post(`${import.meta.env.VITE_API_URL}/api/v1/meetings`,
           {
             meetingName,
           },
